@@ -1,15 +1,15 @@
-import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.core.config import settings
-from app.core.logging import setup_logging
-from app.services.model_manager import ModelManager
-from app.services.conversation_manager import ConversationManager
-from app.api.routes import conversations, models
+from backend.app.api.routes import conversations, models
+from backend.app.core.config import settings
+from backend.app.core.logging import setup_logging
+from backend.app.services.conversation_manager import ConversationManager
+from backend.app.services.model_manager import ModelManager
 
 # Global service instances
 model_manager: ModelManager = None
