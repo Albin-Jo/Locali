@@ -1,7 +1,7 @@
 // frontend/src/components/documents/DocumentItem.tsx
 
 import React, { useState } from 'react'
-import { FileText, Trash2, MoreVertical, Eye, Download } from 'lucide-react'
+import { FileText, Trash2, Eye, Download } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { formatFileSize, formatTimeAgo } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -69,6 +69,14 @@ export function DocumentItem({ document, onDelete, isDeleting }: DocumentItemPro
             <Button
               variant="ghost"
               size="sm"
+              className="h-6 w-6 p-0"
+            >
+              <Download className="w-3 h-3" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onDelete}
               className="h-6 w-6 p-0 text-destructive hover:text-destructive"
               disabled={isDeleting}
@@ -81,4 +89,3 @@ export function DocumentItem({ document, onDelete, isDeleting }: DocumentItemPro
     </div>
   )
 }
-

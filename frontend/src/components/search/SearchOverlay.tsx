@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Search, X, ArrowRight, File, MessageSquare, Hash } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SearchResultItem } from './SearchResultItem'
 import { useSearch } from '@/lib/queries'
 import { useAppStore, appActions } from '@/store'
 import { debounce } from '@/lib/utils'
@@ -159,4 +160,3 @@ export function SearchOverlay() {
     </div>
   )
 }
-
