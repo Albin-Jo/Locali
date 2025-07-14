@@ -1,6 +1,7 @@
 # backend/app/services/vector_search.py
 
 import asyncio
+import os
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -44,22 +45,40 @@ class EmbeddingGenerator:
         try:
             from sentence_transformers import SentenceTransformer
 
-            # Use lightweight model for local processing
-            self.model = SentenceTransformer(self.model_name)
-            logger.info(f"Embedding model initialized: {self.model_name}")
+            # Set cache directory to avoid permission issues
+            cache_dir = Path(settings.vector_db_path) / "sentence_transformers_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # Set environment variable for sentence transformers cache
+            os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(cache_dir)
+
+            # Try to load model with custom cache directory
+            logger.info(f"Initializing embedding model: {self.model_name}")
+            self.model = SentenceTransformer(
+                self.model_name,
+                cache_folder=str(cache_dir)
+            )
+            logger.info(f"Embedding model initialized successfully: {self.model_name}")
 
         except ImportError:
             logger.warning("sentence-transformers not installed. Using dummy embeddings.")
+            logger.info("Install with: pip install sentence-transformers")
+            self.model = None
+        except PermissionError as e:
+            logger.error(f"Permission error loading embedding model: {e}")
+            logger.info("Using dummy embeddings. Check cache directory permissions.")
             self.model = None
         except Exception as e:
             logger.error(f"Failed to initialize embedding model: {e}")
+            logger.info("Using dummy embeddings as fallback.")
             self.model = None
 
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text."""
         if not self.model:
             # Return dummy embedding if model not available
-            return [0.0] * self.embedding_dim
+            logger.debug("Using dummy embedding (model not available)")
+            return [0.1] * self.embedding_dim  # Small non-zero values for better search
 
         try:
             # Run in thread pool to avoid blocking
@@ -72,12 +91,13 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
-            return [0.0] * self.embedding_dim
+            return [0.1] * self.embedding_dim
 
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for multiple texts."""
         if not self.model:
-            return [[0.0] * self.embedding_dim for _ in texts]
+            logger.debug("Using dummy embeddings for batch (model not available)")
+            return [[0.1] * self.embedding_dim for _ in texts]
 
         try:
             loop = asyncio.get_event_loop()
@@ -89,7 +109,7 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate batch embeddings: {e}")
-            return [[0.0] * self.embedding_dim for _ in texts]
+            return [[0.1] * self.embedding_dim for _ in texts]
 
 
 class VectorStore:
@@ -164,9 +184,28 @@ class VectorStore:
         try:
             query_vec = np.array(query_embedding)
 
+            # Handle case where all embeddings are dummy (zeros)
+            if np.allclose(self.vectors, 0):
+                logger.debug("All embeddings are zero/dummy - returning empty results")
+                return []
+
             # Compute cosine similarity
-            similarities = np.dot(self.vectors, query_vec) / (
-                    np.linalg.norm(self.vectors, axis=1) * np.linalg.norm(query_vec)
+            norms = np.linalg.norm(self.vectors, axis=1)
+            query_norm = np.linalg.norm(query_vec)
+
+            if query_norm == 0:
+                logger.debug("Query embedding is zero - returning empty results")
+                return []
+
+            # Avoid division by zero
+            valid_indices = norms > 0
+            if not np.any(valid_indices):
+                logger.debug("No valid vector norms - returning empty results")
+                return []
+
+            similarities = np.zeros(len(self.vectors))
+            similarities[valid_indices] = np.dot(self.vectors[valid_indices], query_vec) / (
+                    norms[valid_indices] * query_norm
             )
 
             # Get top k results

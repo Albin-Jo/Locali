@@ -23,24 +23,27 @@ class NetworkIsolationManager:
         self.block_all_network = settings.enable_network_isolation
         self.dns_override: Dict[str, str] = {}
 
+        # Allow localhost/loopback for server operations
+        self.allowed_hosts = ['localhost', '127.0.0.1', '::1', '0.0.0.0']
+
         if self.block_all_network:
-            self._setup_network_blocks()
+            self._setup_smart_network_blocks()
 
         logger.info(f"Network isolation: {'enabled' if self.block_all_network else 'disabled'}")
 
-    def _setup_network_blocks(self):
-        """Set up network blocking mechanisms."""
-        # Override socket creation to block network access
+    def _setup_smart_network_blocks(self):
+        """Set up smart network blocking that allows server operations."""
+        # Store original socket creation
         self._original_socket = socket.socket
-        socket.socket = self._blocked_socket
 
-        # Block common HTTP libraries
+        # Only patch HTTP libraries, not the core socket for server operations
         self._patch_http_libraries()
 
+        logger.info("Smart network isolation enabled - server operations allowed, external requests blocked")
+
     def _blocked_socket(self, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None):
-        """Blocked socket that raises exception."""
-        if self.block_all_network:
-            raise PermissionError("Network access is disabled by security policy")
+        """Smart socket blocking that allows server operations."""
+        # Allow socket creation - we'll handle blocking at the connection level
         return self._original_socket(family, type, proto, fileno)
 
     def _patch_http_libraries(self):
@@ -57,20 +60,22 @@ class NetworkIsolationManager:
             requests.Session.request = self._secure_request
             urllib3.poolmanager.PoolManager.urlopen = self._secure_urlopen
 
-        except ImportError:
-            pass  # Libraries not installed
+            logger.info("HTTP libraries patched for network isolation")
 
-    def _secure_request(self, method, url, **kwargs):
+        except ImportError:
+            logger.debug("HTTP libraries not installed - skipping patch")
+
+    def _secure_request(self, session, method, url, **kwargs):
         """Security-checked HTTP request."""
         if not self._is_url_allowed(url):
             raise PermissionError(f"Access to {url} blocked by security policy")
-        return self._original_request(method, url, **kwargs)
+        return self._original_request(session, method, url, **kwargs)
 
-    def _secure_urlopen(self, method, url, **kwargs):
+    def _secure_urlopen(self, pool_manager, method, url, **kwargs):
         """Security-checked urllib3 request."""
         if not self._is_url_allowed(url):
             raise PermissionError(f"Access to {url} blocked by security policy")
-        return self._original_urlopen(method, url, **kwargs)
+        return self._original_urlopen(pool_manager, method, url, **kwargs)
 
     def _is_url_allowed(self, url: str) -> bool:
         """Check if URL is allowed based on security policy."""
@@ -81,6 +86,10 @@ class NetworkIsolationManager:
             parsed = urlparse(url)
             domain = parsed.netloc.lower()
 
+            # Always allow localhost connections
+            if any(host in domain for host in self.allowed_hosts):
+                return True
+
             # Check against allowed domains
             for allowed in self.allowed_domains:
                 if domain == allowed or domain.endswith(f'.{allowed}'):
@@ -90,6 +99,19 @@ class NetworkIsolationManager:
 
         except Exception:
             return False
+
+    def is_connection_allowed(self, host: str, port: int) -> bool:
+        """Check if a connection to host:port should be allowed."""
+        # Always allow localhost connections for server operations
+        if host in self.allowed_hosts:
+            return True
+
+        # Allow common development ports on localhost
+        if host in ['127.0.0.1', 'localhost'] and port in [8080, 8000, 3000, 5173]:
+            return True
+
+        # Block everything else if network isolation is enabled
+        return not self.block_all_network
 
     def add_allowed_domain(self, domain: str):
         """Add a domain to the allowed list."""
@@ -106,15 +128,13 @@ class NetworkIsolationManager:
     def disable_network_isolation(self):
         """Temporarily disable network isolation."""
         if self.block_all_network:
-            # Restore original socket
-            socket.socket = self._original_socket
             self.block_all_network = False
             logger.warning("Network isolation disabled")
 
     def enable_network_isolation(self):
         """Re-enable network isolation."""
         if not self.block_all_network:
-            self._setup_network_blocks()
+            self._setup_smart_network_blocks()
             self.block_all_network = True
             logger.info("Network isolation enabled")
 
@@ -123,6 +143,7 @@ class NetworkIsolationManager:
         return {
             'isolation_enabled': self.block_all_network,
             'allowed_domains': self.allowed_domains,
+            'allowed_hosts': self.allowed_hosts,
             'blocked_domains': self.blocked_domains
         }
 

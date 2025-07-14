@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     cpu_threads: Optional[int] = Field(default=None, description="Number of CPU threads (None for auto)")
 
     # Development Settings
-    debug: bool = Field(default=False, description="Enable debug mode")
+    debug: bool = Field(default=True, description="Enable debug mode")
     cors_origins: List[str] = Field(
         default=["http://localhost:3000", "http://localhost:5173"],
         description="CORS allowed origins"

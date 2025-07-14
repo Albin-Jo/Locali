@@ -1,6 +1,7 @@
 # backend/app/services/system.py
 
 import asyncio
+import os
 import platform
 import psutil
 import time
