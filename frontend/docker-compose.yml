@@ -1,0 +1,37 @@
+# frontend/docker-compose.yml
+
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    ports:
+      - "3000:80"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    image: locali-backend:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - LOCALI_HOST=0.0.0.0
+      - LOCALI_PORT=8080
+    volumes:
+      - models:/app/models
+      - data:/app/data
+    restart: unless-stopped
+
+volumes:
+  models:
+  data:

@@ -1,0 +1,194 @@
+/* frontend/src/index.css */
+
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* CSS Variables for theming */
+@layer base {
+  :root {
+    --background: 240 23% 9%;
+    --foreground: 0 0% 100%;
+    --card: 240 19% 16%;
+    --card-foreground: 0 0% 100%;
+    --popover: 240 19% 16%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 173 100% 42%;
+    --primary-foreground: 240 23% 9%;
+    --secondary: 240 19% 16%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 19% 16%;
+    --muted-foreground: 0 0% 63%;
+    --accent: 240 19% 16%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 19% 27%;
+    --input: 240 19% 16%;
+    --ring: 173 100% 42%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted/20;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted/40 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted/60;
+  }
+
+  /* Code highlighting */
+  .hljs {
+    @apply bg-transparent;
+  }
+
+  /* Monaco Editor theme fixes */
+  .monaco-editor {
+    @apply bg-transparent;
+  }
+
+  /* Message animations */
+  .message-enter {
+    @apply opacity-0 translate-y-2;
+  }
+
+  .message-enter-active {
+    @apply opacity-100 translate-y-0 transition-all duration-300;
+  }
+
+  /* Typing indicator */
+  .typing-dots {
+    @apply flex space-x-1;
+  }
+
+  .typing-dot {
+    @apply w-2 h-2 bg-primary/60 rounded-full animate-pulse;
+    animation-delay: calc(var(--delay) * 200ms);
+  }
+
+  /* Code block styling */
+  pre[class*="language-"] {
+    @apply bg-card border border-border rounded-lg p-4 overflow-x-auto;
+  }
+
+  code[class*="language-"] {
+    @apply text-sm font-mono;
+  }
+
+  /* Syntax highlighting colors */
+  .token.comment {
+    @apply text-muted-foreground;
+  }
+
+  .token.keyword {
+    @apply text-blue-400;
+  }
+
+  .token.string {
+    @apply text-green-400;
+  }
+
+  .token.number {
+    @apply text-orange-400;
+  }
+
+  .token.function {
+    @apply text-yellow-400;
+  }
+
+  .token.operator {
+    @apply text-red-400;
+  }
+
+  /* Loading states */
+  .loading-shimmer {
+    @apply bg-gradient-to-r from-muted/20 via-muted/40 to-muted/20 bg-[length:200%_100%];
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Custom focus styles */
+  .focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Custom button styles */
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 focus:ring-primary;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 focus:ring-secondary;
+  }
+
+  .btn-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground focus:ring-accent;
+  }
+
+  /* Message bubble styles */
+  .message-user {
+    @apply bg-primary/10 border-primary/20;
+  }
+
+  .message-assistant {
+    @apply bg-card border-border;
+  }
+
+  /* Sidebar styles */
+  .sidebar-item {
+    @apply w-full p-3 text-left rounded-lg transition-colors duration-200;
+    @apply hover:bg-accent hover:text-accent-foreground;
+    @apply focus:bg-accent focus:text-accent-foreground focus:outline-none;
+  }
+
+  .sidebar-item-active {
+    @apply bg-primary/20 text-primary border border-primary/30;
+  }
+
+  /* Input styles */
+  .input-field {
+    @apply w-full px-4 py-3 bg-input border border-border rounded-lg;
+    @apply focus:ring-2 focus:ring-ring focus:border-ring;
+    @apply placeholder:text-muted-foreground;
+  }
+
+  /* Code action buttons */
+  .code-action-btn {
+    @apply px-3 py-1 text-xs bg-secondary border border-border rounded-md;
+    @apply hover:bg-secondary/80 transition-colors duration-200;
+    @apply focus:ring-1 focus:ring-ring;
+  }
+}
+
+/* Frontend type definitions */

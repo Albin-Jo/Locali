@@ -1,0 +1,148 @@
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Locali - Privacy-first local AI coding assistant" />
+    <meta name="author" content="Locali Team" />
+
+    <!-- Preconnect to improve performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!-- Inter font for better typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- JetBrains Mono for code -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <title>Locali - AI Coding Assistant</title>
+
+    <style>
+      /* Prevent flash of unstyled content */
+      html {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      }
+
+      /* Loading animation */
+      .loading-app {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: hsl(240, 23%, 9%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+
+      .loading-content {
+        text-align: center;
+        color: hsl(0, 0%, 100%);
+      }
+
+      .loading-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: hsl(173, 100%, 42%);
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      .loading-spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid hsl(240, 23%, 9%);
+        border-top: 2px solid transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      /* Hide loading screen when app loads */
+      .app-loaded .loading-app {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loading screen -->
+    <div class="loading-app">
+      <div class="loading-content">
+        <div class="loading-icon">
+          <div class="loading-spinner"></div>
+        </div>
+        <h1 style="font-size: 24px; font-weight: 600; margin-bottom: 8px;">Locali</h1>
+        <p style="color: hsl(0, 0%, 63%); margin-bottom: 16px;">Starting your AI coding assistant...</p>
+      </div>
+    </div>
+
+    <!-- React app root -->
+    <div id="root"></div>
+
+    <!-- App scripts -->
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Keyboard shortcuts -->
+    <script>
+      // Global keyboard shortcuts
+      document.addEventListener('keydown', function(e) {
+        // Cmd/Ctrl + K for search
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+          e.preventDefault();
+          // This will be handled by React components
+          window.dispatchEvent(new CustomEvent('open-search'));
+        }
+
+        // Cmd/Ctrl + / for command palette (future feature)
+        if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+          e.preventDefault();
+          // Future: command palette
+        }
+
+        // Escape key handling
+        if (e.key === 'Escape') {
+          // Let React components handle this
+          window.dispatchEvent(new CustomEvent('escape-key'));
+        }
+      });
+
+      // Remove loading screen when React app is ready
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          document.body.classList.add('app-loaded');
+        }, 100);
+      });
+    </script>
+
+    <!-- Error tracking (optional, for development) -->
+    <script>
+      // Simple error tracking for development
+      window.addEventListener('error', function(e) {
+        console.error('Global error:', e.error);
+      });
+
+      window.addEventListener('unhandledrejection', function(e) {
+        console.error('Unhandled promise rejection:', e.reason);
+      });
+    </script>
+  </body>
+</html>
+
+
