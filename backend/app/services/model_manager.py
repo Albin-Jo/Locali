@@ -1,12 +1,12 @@
 # backend/app/services/model_manager.py
 
 import asyncio
-import psutil
 from pathlib import Path
-from typing import Optional, Dict, Any, AsyncIterator
-from contextlib import asynccontextmanager
+from typing import Optional, Dict, AsyncIterator
 
+import psutil
 from loguru import logger
+
 from ..core.config import settings, get_model_config, get_system_info
 from ..core.logging import log_performance, log_model_operation
 
@@ -157,6 +157,15 @@ class LlamaModel:
         return self.config.get("recommended_ram_gb", 8) * 1024
 
 
+def _check_llama_availability() -> bool:
+    """Check if llama-cpp-python is available."""
+    try:
+        import llama_cpp
+        return True
+    except ImportError:
+        return False
+
+
 class ModelManager:
     """Manages multiple LLM models with memory-efficient loading."""
 
@@ -165,8 +174,13 @@ class ModelManager:
         self.current_model: Optional[str] = None
         self.models_dir = settings.models_dir
         self.max_memory_mb = settings.max_memory_gb * 1024
+        self._llama_available = _check_llama_availability()
 
         logger.info(f"ModelManager initialized - Models dir: {self.models_dir}")
+
+        if not self._llama_available:
+            logger.warning("⚠️  llama-cpp-python not available. Model loading will fail.")
+            logger.info("Install with: pip install llama-cpp-python")
 
     async def list_available_models(self) -> Dict[str, dict]:
         """List all available models with their info."""
@@ -182,13 +196,19 @@ class ModelManager:
                 "exists": model_path.exists(),
                 "size_mb": model_path.stat().st_size // (1024 * 1024) if model_path.exists() else 0,
                 "config": config,
-                "loaded": model_name in self.models and self.models[model_name].is_loaded
+                "loaded": model_name in self.models and self.models[model_name].is_loaded,
+                "llama_available": self._llama_available
             }
 
         return available
 
     async def load_model(self, model_name: str) -> bool:
-        """Load a specific model."""
+        """Load a specific model with proper error handling."""
+        if not self._llama_available:
+            raise ModelLoadError(
+                "llama-cpp-python not installed. Install with: pip install llama-cpp-python"
+            )
+
         if model_name in self.models and self.models[model_name].is_loaded:
             logger.info(f"Model {model_name} already loaded")
             self.current_model = model_name
@@ -199,20 +219,28 @@ class ModelManager:
         model_path = self.models_dir / config["model_file"]
 
         if not model_path.exists():
-            raise ModelNotFoundError(f"Model file not found: {model_path}")
+            raise ModelNotFoundError(
+                f"Model file not found: {model_path}. "
+                f"Download the model or check the models directory."
+            )
 
         # Check if we need to free memory
         await self._ensure_memory_available(config)
 
         # Create and load model
-        model = LlamaModel(str(model_path), config)
-        await model.load()
+        try:
+            model = LlamaModel(str(model_path), config)
+            await model.load()
 
-        self.models[model_name] = model
-        self.current_model = model_name
+            self.models[model_name] = model
+            self.current_model = model_name
 
-        logger.info(f"Model {model_name} loaded as current model")
-        return True
+            logger.info(f"✅ Model {model_name} loaded successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to load model {model_name}: {e}")
+            raise ModelLoadError(f"Failed to load model {model_name}: {str(e)}")
 
     async def unload_model(self, model_name: str) -> bool:
         """Unload a specific model."""
@@ -253,17 +281,30 @@ class ModelManager:
             model_name: str = None,
             **kwargs
     ) -> AsyncIterator[str]:
-        """Generate streaming response from current or specified model."""
+        """Generate streaming response with better error handling."""
         target_model = model_name or self.current_model
 
         if not target_model:
-            raise ModelLoadError("No model loaded")
+            raise ModelLoadError("No model loaded. Load a model first.")
+
+        if not self._llama_available:
+            raise ModelLoadError("llama-cpp-python not available")
 
         if target_model not in self.models or not self.models[target_model].is_loaded:
-            await self.load_model(target_model)
+            try:
+                await self.load_model(target_model)
+            except Exception as e:
+                logger.error(f"Failed to load model for generation: {e}")
+                # Yield error message instead of raising
+                yield f"Error: Failed to load model {target_model}. {str(e)}"
+                return
 
-        async for token in self.models[target_model].generate_stream(prompt, **kwargs):
-            yield token
+        try:
+            async for token in self.models[target_model].generate_stream(prompt, **kwargs):
+                yield token
+        except Exception as e:
+            logger.error(f"Generation failed: {e}")
+            yield f"Error: Generation failed - {str(e)}"
 
     async def _ensure_memory_available(self, model_config: dict):
         """Ensure enough memory is available for loading model."""

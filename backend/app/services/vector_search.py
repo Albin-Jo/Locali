@@ -1,17 +1,18 @@
 # backend/app/services/vector_search.py
 
 import asyncio
+import json
 import os
-import numpy as np
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
-import json
 
+import numpy as np
 from loguru import logger
+
+from .document_processor import DocumentChunk, ProcessedDocument
 from ..core.config import settings
 from ..core.logging import log_performance
-from .document_processor import DocumentChunk, ProcessedDocument
 
 
 @dataclass
@@ -36,12 +37,13 @@ class EmbeddingGenerator:
 
     def __init__(self):
         self.model = None
-        self.model_name = "sentence-transformers/all-MiniLM-L6-v2"  # Lightweight model
+        self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
         self.embedding_dim = 384
+        self.use_dummy_embeddings = False
         self._initialize_model()
 
     def _initialize_model(self):
-        """Initialize the embedding model."""
+        """Initialize the embedding model with proper error handling."""
         try:
             from sentence_transformers import SentenceTransformer
 
@@ -52,33 +54,51 @@ class EmbeddingGenerator:
             # Set environment variable for sentence transformers cache
             os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(cache_dir)
 
-            # Try to load model with custom cache directory
-            logger.info(f"Initializing embedding model: {self.model_name}")
-            self.model = SentenceTransformer(
-                self.model_name,
-                cache_folder=str(cache_dir)
-            )
-            logger.info(f"Embedding model initialized successfully: {self.model_name}")
+            # Try to load model - first check if it exists locally
+            try:
+                logger.info(f"Attempting to load embedding model: {self.model_name}")
+                self.model = SentenceTransformer(
+                    self.model_name,
+                    cache_folder=str(cache_dir)
+                )
+                logger.info(f"✅ Embedding model loaded successfully: {self.model_name}")
+
+            except Exception as download_error:
+                logger.warning(f"Failed to download model: {download_error}")
+
+                # Try to use a local model if available
+                local_model_path = cache_dir / "all-MiniLM-L6-v2"
+                if local_model_path.exists():
+                    logger.info("Using cached local model")
+                    self.model = SentenceTransformer(str(local_model_path))
+                else:
+                    raise download_error
 
         except ImportError:
             logger.warning("sentence-transformers not installed. Using dummy embeddings.")
             logger.info("Install with: pip install sentence-transformers")
+            self.use_dummy_embeddings = True
             self.model = None
-        except PermissionError as e:
-            logger.error(f"Permission error loading embedding model: {e}")
-            logger.info("Using dummy embeddings. Check cache directory permissions.")
-            self.model = None
+
         except Exception as e:
             logger.error(f"Failed to initialize embedding model: {e}")
             logger.info("Using dummy embeddings as fallback.")
+            self.use_dummy_embeddings = True
             self.model = None
 
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text."""
-        if not self.model:
-            # Return dummy embedding if model not available
-            logger.debug("Using dummy embedding (model not available)")
-            return [0.1] * self.embedding_dim  # Small non-zero values for better search
+        if self.use_dummy_embeddings or not self.model:
+            # Generate consistent dummy embedding based on text hash
+            import hashlib
+            text_hash = hashlib.md5(text.encode()).hexdigest()
+            # Create pseudo-random but deterministic embedding
+            embedding = [float(int(text_hash[i:i + 2], 16)) / 255.0 for i in
+                         range(0, min(len(text_hash), self.embedding_dim * 2), 2)]
+            # Pad or truncate to correct dimension
+            while len(embedding) < self.embedding_dim:
+                embedding.append(0.1)
+            return embedding[:self.embedding_dim]
 
         try:
             # Run in thread pool to avoid blocking
@@ -91,6 +111,7 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
+            # Fall back to dummy embedding
             return [0.1] * self.embedding_dim
 
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:

@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -163,13 +164,20 @@ async def send_message(
 ):
     """Send a message to a conversation and get AI response."""
     try:
-        # Validate conversation exists or will be created
+        # Validate conversation exists
         conversation = await conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+            # Auto-create conversation if it doesn't exist
+            conversation = await conversation_manager.create_conversation(
+                model_name=request.model_name
+            )
+            conversation_id = conversation.id
 
         if request.stream:
-            # Streaming response
+            # Streaming response with proper SSE format
             async def generate():
                 try:
+                    response_tokens = []
                     async for token in conversation_manager.generate_response(
                             conversation_id=conversation_id,
                             user_message=request.message,
@@ -178,16 +186,18 @@ async def send_message(
                             temperature=request.temperature,
                             max_tokens=request.max_tokens
                     ):
-                        # Server-Sent Events format
-                        yield f"data: {token}\n\n"
+                        response_tokens.append(token)
+                        # Send individual tokens as SSE
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-                    # End of stream marker
-                    yield "data: [DONE]\n\n"
+                    # Send completion event
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': ''.join(response_tokens)})}\n\n"
 
                 except Exception as e:
                     logger.error(f"Streaming error: {e}")
-                    yield f"data: Error: {str(e)}\n\n"
-                    yield "data: [DONE]\n\n"
+                    error_msg = f"Error: {str(e)}"
+                    yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             return StreamingResponse(
                 generate(),
@@ -195,7 +205,8 @@ async def send_message(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "X-Accel-Buffering": "no"  # Disable nginx buffering
                 }
             )
 
@@ -210,11 +221,16 @@ async def send_message(
                     temperature=request.temperature,
                     max_tokens=request.max_tokens
             ):
-                response_content = token  # Non-streaming returns full response
-                break
+                response_content += token
 
-            return {"response": response_content}
+            return {
+                "response": response_content.strip(),
+                "conversation_id": conversation_id,
+                "model_used": request.model_name or conversation.model_name
+            }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to send message: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")

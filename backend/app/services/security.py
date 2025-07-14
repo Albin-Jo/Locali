@@ -1,16 +1,16 @@
 # backend/app/services/security.py
 
+import base64
+import json
 import os
-import hashlib
 import secrets
 import socket
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from urllib.parse import urlparse
-import base64
-import json
 
 from loguru import logger
+
 from ..core.config import settings
 
 
@@ -56,26 +56,27 @@ class NetworkIsolationManager:
             self._original_request = requests.Session.request
             self._original_urlopen = urllib3.poolmanager.PoolManager.urlopen
 
+            # Create wrapper functions with correct signatures
+            def secure_request_wrapper(session, method, url, **kwargs):
+                """Security-checked HTTP request wrapper."""
+                if not self._is_url_allowed(url):
+                    raise PermissionError(f"Access to {url} blocked by security policy")
+                return self._original_request(session, method, url, **kwargs)
+
+            def secure_urlopen_wrapper(pool_manager, method, url, **kwargs):
+                """Security-checked urllib3 request wrapper."""
+                if not self._is_url_allowed(url):
+                    raise PermissionError(f"Access to {url} blocked by security policy")
+                return self._original_urlopen(pool_manager, method, url, **kwargs)
+
             # Replace with security-checked versions
-            requests.Session.request = self._secure_request
-            urllib3.poolmanager.PoolManager.urlopen = self._secure_urlopen
+            requests.Session.request = secure_request_wrapper
+            urllib3.poolmanager.PoolManager.urlopen = secure_urlopen_wrapper
 
             logger.info("HTTP libraries patched for network isolation")
 
         except ImportError:
             logger.debug("HTTP libraries not installed - skipping patch")
-
-    def _secure_request(self, session, method, url, **kwargs):
-        """Security-checked HTTP request."""
-        if not self._is_url_allowed(url):
-            raise PermissionError(f"Access to {url} blocked by security policy")
-        return self._original_request(session, method, url, **kwargs)
-
-    def _secure_urlopen(self, pool_manager, method, url, **kwargs):
-        """Security-checked urllib3 request."""
-        if not self._is_url_allowed(url):
-            raise PermissionError(f"Access to {url} blocked by security policy")
-        return self._original_urlopen(pool_manager, method, url, **kwargs)
 
     def _is_url_allowed(self, url: str) -> bool:
         """Check if URL is allowed based on security policy."""
