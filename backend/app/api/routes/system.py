@@ -1,5 +1,3 @@
-# backend/app/api/routes/system.py
-
 from typing import List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends

@@ -1,10 +1,10 @@
-# backend/app/api/routes/tasks.py
-
 from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, Depends
+from loguru import logger
 from pydantic import BaseModel
 
-from ...services.background_tasks import BackgroundTaskManager, TaskResult, get_task_manager
+from ...services.background_tasks import BackgroundTaskManager
 
 
 # Dependency placeholder - will be overridden in main.py
@@ -145,5 +145,3 @@ async def get_task_stats(
     except Exception as e:
         logger.error(f"Failed to get task stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get task stats")
-
-# backend/app/utils/__init__.py
