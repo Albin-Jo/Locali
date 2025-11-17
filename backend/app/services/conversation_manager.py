@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, asdict
@@ -74,14 +76,42 @@ class ConversationStorage:
         if not self.conversations_file.exists():
             self.conversations_file.write_text(json.dumps({}))
 
+    def _atomic_write(self, data: dict):
+        """Atomically write data to file using temp file + rename.
+
+        This prevents corruption from concurrent writes or crashes mid-write.
+        The rename operation is atomic on POSIX systems.
+        """
+        # Create temp file in same directory (same filesystem for atomic rename)
+        fd, temp_path = tempfile.mkstemp(
+            dir=self.storage_path,
+            prefix='.conversations_',
+            suffix='.tmp'
+        )
+
+        try:
+            # Write data to temp file
+            with os.fdopen(fd, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            # Atomic rename (replaces old file)
+            os.replace(temp_path, self.conversations_file)
+
+        except Exception as e:
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            raise e
+
     async def save_conversation(self, conversation: Conversation):
         """Save a conversation to storage."""
         conversations = await self.load_all_conversations()
         conversations[conversation.id] = conversation.to_dict()
 
-        # Write to file
-        with open(self.conversations_file, 'w') as f:
-            json.dump(conversations, f, indent=2)
+        # Atomic write to prevent corruption
+        self._atomic_write(conversations)
 
     async def load_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Load a specific conversation."""
@@ -103,8 +133,8 @@ class ConversationStorage:
         conversations = await self.load_all_conversations()
         if conversation_id in conversations:
             del conversations[conversation_id]
-            with open(self.conversations_file, 'w') as f:
-                json.dump(conversations, f, indent=2)
+            # Atomic write to prevent corruption
+            self._atomic_write(conversations)
             return True
         return False
 

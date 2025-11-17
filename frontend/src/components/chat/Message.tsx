@@ -31,8 +31,8 @@ export function Message({ message, isLast, isStreaming }: MessageProps) {
   // Extract code blocks
   const codeBlocks = extractCodeBlocks(message.content)
 
-  // Remove code blocks from text content
-  const textContent = message.content.replace(/```(\w+)?\n([\s\S]*?)```/g, '')
+  // Remove code blocks from text content (matches improved regex in utils.ts)
+  const textContent = message.content.replace(/```(\w+)?[ \t]*\n([\s\S]*?)```(?:\n|$)/g, '')
 
   // Render markdown to HTML (memoized for performance)
   const renderedHtml = useMemo(() => {

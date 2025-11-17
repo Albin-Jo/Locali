@@ -86,19 +86,26 @@ class EmbeddingGenerator:
             self.use_dummy_embeddings = True
             self.model = None
 
+    def _generate_hash_based_embedding(self, text: str) -> List[float]:
+        """Generate consistent deterministic embedding based on text hash.
+
+        This provides better fallback than identical dummy vectors, as different
+        texts will have different (though not semantically meaningful) embeddings.
+        """
+        import hashlib
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        # Create pseudo-random but deterministic embedding
+        embedding = [float(int(text_hash[i:i + 2], 16)) / 255.0 for i in
+                     range(0, min(len(text_hash), self.embedding_dim * 2), 2)]
+        # Pad or truncate to correct dimension
+        while len(embedding) < self.embedding_dim:
+            embedding.append(0.1)
+        return embedding[:self.embedding_dim]
+
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text."""
         if self.use_dummy_embeddings or not self.model:
-            # Generate consistent dummy embedding based on text hash
-            import hashlib
-            text_hash = hashlib.md5(text.encode()).hexdigest()
-            # Create pseudo-random but deterministic embedding
-            embedding = [float(int(text_hash[i:i + 2], 16)) / 255.0 for i in
-                         range(0, min(len(text_hash), self.embedding_dim * 2), 2)]
-            # Pad or truncate to correct dimension
-            while len(embedding) < self.embedding_dim:
-                embedding.append(0.1)
-            return embedding[:self.embedding_dim]
+            return self._generate_hash_based_embedding(text)
 
         try:
             # Run in thread pool to avoid blocking
@@ -111,14 +118,14 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
-            # Fall back to dummy embedding
-            return [0.1] * self.embedding_dim
+            # Fall back to hash-based embedding (deterministic per text)
+            return self._generate_hash_based_embedding(text)
 
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for multiple texts."""
         if not self.model:
-            logger.debug("Using dummy embeddings for batch (model not available)")
-            return [[0.1] * self.embedding_dim for _ in texts]
+            logger.debug("Using hash-based embeddings for batch (model not available)")
+            return [self._generate_hash_based_embedding(text) for text in texts]
 
         try:
             loop = asyncio.get_event_loop()
@@ -130,7 +137,8 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.error(f"Failed to generate batch embeddings: {e}")
-            return [[0.1] * self.embedding_dim for _ in texts]
+            # Fall back to hash-based embeddings (deterministic per text)
+            return [self._generate_hash_based_embedding(text) for text in texts]
 
 
 class VectorStore:
