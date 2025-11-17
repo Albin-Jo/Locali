@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import mimetypes
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncIterator
 from dataclasses import dataclass, asdict
@@ -120,8 +121,10 @@ class CodeParser:
                             'function': current_function
                         })
                     current_chunk = [line]
-                    current_function = line_stripped.split('(')[0].replace('def ', '').replace('class ', '').replace(
-                        'async ', '').strip()
+                    # Robust function/class name extraction using regex
+                    # Matches: [async] (def|class) name(...)
+                    match = re.match(r'^\s*(?:async\s+)?(?:def|class)\s+(\w+)', line)
+                    current_function = match.group(1) if match else 'unknown'
                     chunk_start = i
                 else:
                     current_chunk.append(line)
@@ -227,6 +230,31 @@ class DocumentProcessor:
         self.chunk_overlap = 100  # characters
 
         logger.info("DocumentProcessor initialized")
+
+    @staticmethod
+    def _sanitize_id(doc_id: str) -> str:
+        """Sanitize document ID to prevent path traversal attacks.
+
+        Args:
+            doc_id: Document ID to sanitize
+
+        Returns:
+            Sanitized ID safe for use in file paths
+
+        Raises:
+            ValueError: If ID contains invalid characters
+        """
+        # Remove any path separators and ensure it's a valid filename
+        # Only allow alphanumeric, hyphens, and underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', doc_id)
+
+        if not sanitized or sanitized != doc_id:
+            raise ValueError(
+                f"Invalid document ID: {doc_id}. "
+                f"IDs must contain only alphanumeric characters, hyphens, and underscores."
+            )
+
+        return sanitized
 
     @log_performance("process_document")
     async def process_document(self, file_path: Path, content: str = None) -> ProcessedDocument:
@@ -380,7 +408,9 @@ class DocumentProcessor:
 
     async def _save_document_metadata(self, document: ProcessedDocument):
         """Save document metadata to storage."""
-        metadata_file = self.documents_dir / f"{document.id}.json"
+        # Sanitize ID to prevent path traversal
+        safe_id = self._sanitize_id(document.id)
+        metadata_file = self.documents_dir / f"{safe_id}.json"
 
         with open(metadata_file, 'w') as f:
             import json
@@ -388,7 +418,9 @@ class DocumentProcessor:
 
     async def get_document(self, document_id: str) -> Optional[ProcessedDocument]:
         """Retrieve a processed document."""
-        metadata_file = self.documents_dir / f"{document_id}.json"
+        # Sanitize ID to prevent path traversal
+        safe_id = self._sanitize_id(document_id)
+        metadata_file = self.documents_dir / f"{safe_id}.json"
 
         if not metadata_file.exists():
             return None

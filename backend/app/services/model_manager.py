@@ -1,6 +1,7 @@
 # backend/app/services/model_manager.py
 
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, Dict, AsyncIterator
 
@@ -40,6 +41,18 @@ class LlamaModel:
     async def load(self):
         """Load the model into memory."""
         try:
+            # Validate model file exists before attempting load
+            model_file = Path(self.model_path)
+            if not model_file.exists():
+                raise FileNotFoundError(
+                    f"Model file not found: {self.model_path}. "
+                    f"Please download the model or check the path."
+                )
+            if not model_file.is_file():
+                raise ValueError(
+                    f"Model path is not a file: {self.model_path}"
+                )
+
             # Import here to avoid dependency issues if not installed
             from llama_cpp import Llama
 
@@ -170,7 +183,7 @@ class ModelManager:
     """Manages multiple LLM models with memory-efficient loading."""
 
     def __init__(self):
-        self.models: Dict[str, LlamaModel] = {}
+        self.models: OrderedDict[str, LlamaModel] = OrderedDict()
         self.current_model: Optional[str] = None
         self.models_dir = settings.models_dir
         self.max_memory_mb = settings.max_memory_gb * 1024
@@ -212,6 +225,8 @@ class ModelManager:
         if model_name in self.models and self.models[model_name].is_loaded:
             logger.info(f"Model {model_name} already loaded")
             self.current_model = model_name
+            # Move to end to mark as recently used (LRU)
+            self.models.move_to_end(model_name)
             return True
 
         # Get model configuration
@@ -232,6 +247,7 @@ class ModelManager:
             model = LlamaModel(str(model_path), config)
             await model.load()
 
+            # Add to OrderedDict (will be at the end, marking as most recently used)
             self.models[model_name] = model
             self.current_model = model_name
 
@@ -299,6 +315,9 @@ class ModelManager:
                 yield f"Error: Failed to load model {target_model}. {str(e)}"
                 return
 
+        # Mark model as recently used (LRU tracking)
+        self.models.move_to_end(target_model)
+
         try:
             async for token in self.models[target_model].generate_stream(prompt, **kwargs):
                 yield token
@@ -314,9 +333,9 @@ class ModelManager:
 
         # Unload models if necessary (LRU strategy)
         while available_mb < required_mb and self.models:
-            # Find least recently used model (simplified - just unload first)
+            # Get least recently used model (first item in OrderedDict)
             lru_model = next(iter(self.models.keys()))
-            logger.info(f"Freeing memory by unloading {lru_model}")
+            logger.info(f"Freeing memory by unloading least recently used model: {lru_model}")
             await self.unload_model(lru_model)
 
             current_usage = sum(model.memory_usage_mb for model in self.models.values())

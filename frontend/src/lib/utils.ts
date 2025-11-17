@@ -43,14 +43,19 @@ export function truncateText(text: string, maxLength: number): string {
 }
 
 export function extractCodeBlocks(content: string) {
-  const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
+  // Improved regex that handles:
+  // - Optional language specifier
+  // - Optional whitespace after opening ```
+  // - Non-greedy matching with proper boundary detection
+  // - Newline or end of string after closing ```
+  const codeBlockRegex = /```(\w+)?[ \t]*\n([\s\S]*?)```(?:\n|$)/g
   const blocks = []
   let match
 
   while ((match = codeBlockRegex.exec(content)) !== null) {
     blocks.push({
       language: match[1] || 'text',
-      code: match[2].trim(),
+      code: match[2].trimEnd(), // Preserve leading whitespace for indentation
       fullMatch: match[0],
     })
   }

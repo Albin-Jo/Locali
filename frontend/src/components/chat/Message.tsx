@@ -1,13 +1,22 @@
 // frontend/src/components/chat/Message.tsx
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Copy, Insert, MoreHorizontal, Check } from 'lucide-react'
+import MarkdownIt from 'markdown-it'
 import { Button } from '@/components/ui/Button'
 import { CodeBlock } from './CodeBlock'
 import { useClipboard } from '@/hooks/useClipboard'
 import { extractCodeBlocks, formatTimeAgo } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import type { Message as MessageType } from '@/types'
+
+// Initialize markdown-it with sensible defaults
+const md = new MarkdownIt({
+  html: false, // Disable HTML tags in source for security
+  breaks: true, // Convert '\n' in paragraphs into <br>
+  linkify: true, // Auto-convert URL-like text to links
+  typographer: true, // Enable smartquotes and other replacements
+})
 
 interface MessageProps {
   message: MessageType
@@ -19,8 +28,17 @@ export function Message({ message, isLast, isStreaming }: MessageProps) {
   const [showActions, setShowActions] = useState(false)
   const { copyToClipboard, hasCopied } = useClipboard()
 
+  // Extract code blocks
   const codeBlocks = extractCodeBlocks(message.content)
-  const textContent = message.content.replace(/```(\w+)?\n([\s\S]*?)```/g, '')
+
+  // Remove code blocks from text content (matches improved regex in utils.ts)
+  const textContent = message.content.replace(/```(\w+)?[ \t]*\n([\s\S]*?)```(?:\n|$)/g, '')
+
+  // Render markdown to HTML (memoized for performance)
+  const renderedHtml = useMemo(() => {
+    if (!textContent.trim()) return ''
+    return md.render(textContent.trim())
+  }, [textContent])
 
   const handleCopy = () => {
     copyToClipboard(message.content)
@@ -61,15 +79,12 @@ export function Message({ message, isLast, isStreaming }: MessageProps) {
           </span>
         </div>
 
-        {/* Text content */}
-        {textContent.trim() && (
-          <div className="prose prose-sm max-w-none text-foreground mb-4">
-            {textContent.trim().split('\n').map((line, index) => (
-              <p key={index} className="mb-2 last:mb-0">
-                {line || '\u00A0'}
-              </p>
-            ))}
-          </div>
+        {/* Text content with markdown rendering */}
+        {renderedHtml && (
+          <div
+            className="prose prose-sm max-w-none text-foreground mb-4 markdown-content"
+            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          />
         )}
 
         {/* Code blocks */}

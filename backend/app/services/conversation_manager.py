@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +13,7 @@ from loguru import logger
 from .model_manager import ModelManager
 from ..core.config import settings
 from ..core.logging import log_performance
+from ..utils.token_counter import get_token_counter
 
 
 @dataclass
@@ -73,14 +77,42 @@ class ConversationStorage:
         if not self.conversations_file.exists():
             self.conversations_file.write_text(json.dumps({}))
 
+    def _atomic_write(self, data: dict):
+        """Atomically write data to file using temp file + rename.
+
+        This prevents corruption from concurrent writes or crashes mid-write.
+        The rename operation is atomic on POSIX systems.
+        """
+        # Create temp file in same directory (same filesystem for atomic rename)
+        fd, temp_path = tempfile.mkstemp(
+            dir=self.storage_path,
+            prefix='.conversations_',
+            suffix='.tmp'
+        )
+
+        try:
+            # Write data to temp file
+            with os.fdopen(fd, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            # Atomic rename (replaces old file)
+            os.replace(temp_path, self.conversations_file)
+
+        except Exception as e:
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            raise e
+
     async def save_conversation(self, conversation: Conversation):
         """Save a conversation to storage."""
         conversations = await self.load_all_conversations()
         conversations[conversation.id] = conversation.to_dict()
 
-        # Write to file
-        with open(self.conversations_file, 'w') as f:
-            json.dump(conversations, f, indent=2)
+        # Atomic write to prevent corruption
+        self._atomic_write(conversations)
 
     async def load_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Load a specific conversation."""
@@ -102,8 +134,8 @@ class ConversationStorage:
         conversations = await self.load_all_conversations()
         if conversation_id in conversations:
             del conversations[conversation_id]
-            with open(self.conversations_file, 'w') as f:
-                json.dump(conversations, f, indent=2)
+            # Atomic write to prevent corruption
+            self._atomic_write(conversations)
             return True
         return False
 
@@ -137,6 +169,7 @@ class ContextManager:
     def __init__(self, max_context_length: int = 8192):
         self.max_context_length = max_context_length
         self.system_prompt = self._get_system_prompt()
+        self.token_counter = get_token_counter()
 
     def _get_system_prompt(self) -> str:
         """Get the system prompt for the coding assistant."""
@@ -167,14 +200,17 @@ Respond in a conversational tone while being technically accurate."""
         # Start with system prompt
         prompt_parts = [f"System: {self.system_prompt}\n"]
 
-        # Estimate tokens (rough approximation: 1 token ≈ 4 characters)
-        current_tokens = len(self.system_prompt) // 4
+        # Count tokens accurately using tiktoken
+        current_tokens = self.token_counter.count_tokens(self.system_prompt)
         max_tokens = self.max_context_length - 1000  # Reserve space for response
 
         # Add messages in reverse order (most recent first)
         included_messages = []
         for message in reversed(messages):
-            message_tokens = len(message.content) // 4
+            # Accurate token count for message
+            message_tokens = self.token_counter.count_tokens(
+                f"{message.role.capitalize()}: {message.content}"
+            )
 
             if current_tokens + message_tokens > max_tokens:
                 break
@@ -212,13 +248,29 @@ Respond in a conversational tone while being technically accurate."""
 class ConversationManager:
     """Manages conversations, context, and integrates with ModelManager."""
 
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: ModelManager, max_active_conversations: int = 100):
         self.model_manager = model_manager
         self.storage = ConversationStorage(settings.database_url.replace('.db', '_conversations'))
         self.context_manager = ContextManager(settings.max_context_length)
-        self.active_conversations: Dict[str, Conversation] = {}
+        self.active_conversations: OrderedDict[str, Conversation] = OrderedDict()
+        self.max_active_conversations = max_active_conversations
 
-        logger.info("ConversationManager initialized")
+        logger.info(f"ConversationManager initialized (max active: {max_active_conversations})")
+
+    def _add_to_cache(self, conversation_id: str, conversation: Conversation):
+        """Add conversation to cache with LRU eviction."""
+        # If conversation already exists, move it to end (most recently used)
+        if conversation_id in self.active_conversations:
+            self.active_conversations.move_to_end(conversation_id)
+        else:
+            # Add new conversation
+            self.active_conversations[conversation_id] = conversation
+
+            # Evict least recently used if cache is full
+            if len(self.active_conversations) > self.max_active_conversations:
+                lru_id = next(iter(self.active_conversations))
+                logger.debug(f"Evicting conversation {lru_id} from cache (LRU)")
+                del self.active_conversations[lru_id]
 
     async def create_conversation(self, title: str = None, model_name: str = None) -> Conversation:
         """Create a new conversation."""
@@ -234,8 +286,8 @@ class ConversationManager:
             model_name=model_name or self.model_manager.current_model
         )
 
-        # Store in memory and persistence
-        self.active_conversations[conversation_id] = conversation
+        # Store in memory cache and persistence
+        self._add_to_cache(conversation_id, conversation)
         await self.storage.save_conversation(conversation)
 
         logger.info(f"Created conversation: {conversation_id}")
@@ -245,12 +297,15 @@ class ConversationManager:
         """Get a conversation by ID."""
         # Check active conversations first
         if conversation_id in self.active_conversations:
+            # Mark as recently used
+            self.active_conversations.move_to_end(conversation_id)
             return self.active_conversations[conversation_id]
 
         # Load from storage
         conversation = await self.storage.load_conversation(conversation_id)
         if conversation:
-            self.active_conversations[conversation_id] = conversation
+            # Add to cache with LRU eviction
+            self._add_to_cache(conversation_id, conversation)
 
         return conversation
 
@@ -266,11 +321,15 @@ class ConversationManager:
         if not conversation:
             raise ValueError(f"Conversation {conversation_id} not found")
 
+        # Count tokens for this message
+        token_count = self.context_manager.token_counter.count_tokens(content)
+
         message = Message(
             id=str(uuid.uuid4()),
             role=role,
             content=content,
             timestamp=datetime.now(),
+            tokens=token_count,
             metadata=metadata or {}
         )
 

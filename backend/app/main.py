@@ -53,6 +53,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting CodeAssist AI Backend...")
 
+    # Store start time for uptime calculation
+    app.state.start_time = time.time()
+
     try:
         # Initialize security manager first
         security_manager = SecurityManager()
@@ -478,12 +481,6 @@ async def not_found_handler(request: Request, exc):
             "documentation": "/docs" if settings.debug else "Documentation disabled in production"
         }
     )
-
-
-# Store start time for uptime calculation
-@app.on_event("startup")
-async def store_start_time():
-    app.state.start_time = time.time()
 
 
 if __name__ == "__main__":
