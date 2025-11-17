@@ -13,6 +13,7 @@ from loguru import logger
 from .model_manager import ModelManager
 from ..core.config import settings
 from ..core.logging import log_performance
+from ..utils.token_counter import get_token_counter
 
 
 @dataclass
@@ -168,6 +169,7 @@ class ContextManager:
     def __init__(self, max_context_length: int = 8192):
         self.max_context_length = max_context_length
         self.system_prompt = self._get_system_prompt()
+        self.token_counter = get_token_counter()
 
     def _get_system_prompt(self) -> str:
         """Get the system prompt for the coding assistant."""
@@ -198,14 +200,17 @@ Respond in a conversational tone while being technically accurate."""
         # Start with system prompt
         prompt_parts = [f"System: {self.system_prompt}\n"]
 
-        # Estimate tokens (rough approximation: 1 token ≈ 4 characters)
-        current_tokens = len(self.system_prompt) // 4
+        # Count tokens accurately using tiktoken
+        current_tokens = self.token_counter.count_tokens(self.system_prompt)
         max_tokens = self.max_context_length - 1000  # Reserve space for response
 
         # Add messages in reverse order (most recent first)
         included_messages = []
         for message in reversed(messages):
-            message_tokens = len(message.content) // 4
+            # Accurate token count for message
+            message_tokens = self.token_counter.count_tokens(
+                f"{message.role.capitalize()}: {message.content}"
+            )
 
             if current_tokens + message_tokens > max_tokens:
                 break
@@ -316,11 +321,15 @@ class ConversationManager:
         if not conversation:
             raise ValueError(f"Conversation {conversation_id} not found")
 
+        # Count tokens for this message
+        token_count = self.context_manager.token_counter.count_tokens(content)
+
         message = Message(
             id=str(uuid.uuid4()),
             role=role,
             content=content,
             timestamp=datetime.now(),
+            tokens=token_count,
             metadata=metadata or {}
         )
 
