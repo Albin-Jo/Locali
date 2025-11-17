@@ -136,10 +136,23 @@ class ApiClient {
               }
 
               return pump()
+            }).catch((error) => {
+              // Handle stream errors and clean up
+              controller.error(error)
+              reader.releaseLock()
+              throw error
             })
           }
 
           return pump()
+        },
+        cancel() {
+          // Clean up when stream is cancelled
+          try {
+            reader.releaseLock()
+          } catch {
+            // Reader might already be released
+          }
         }
       })
     } catch (error) {

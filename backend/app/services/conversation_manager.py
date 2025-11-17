@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -212,13 +213,29 @@ Respond in a conversational tone while being technically accurate."""
 class ConversationManager:
     """Manages conversations, context, and integrates with ModelManager."""
 
-    def __init__(self, model_manager: ModelManager):
+    def __init__(self, model_manager: ModelManager, max_active_conversations: int = 100):
         self.model_manager = model_manager
         self.storage = ConversationStorage(settings.database_url.replace('.db', '_conversations'))
         self.context_manager = ContextManager(settings.max_context_length)
-        self.active_conversations: Dict[str, Conversation] = {}
+        self.active_conversations: OrderedDict[str, Conversation] = OrderedDict()
+        self.max_active_conversations = max_active_conversations
 
-        logger.info("ConversationManager initialized")
+        logger.info(f"ConversationManager initialized (max active: {max_active_conversations})")
+
+    def _add_to_cache(self, conversation_id: str, conversation: Conversation):
+        """Add conversation to cache with LRU eviction."""
+        # If conversation already exists, move it to end (most recently used)
+        if conversation_id in self.active_conversations:
+            self.active_conversations.move_to_end(conversation_id)
+        else:
+            # Add new conversation
+            self.active_conversations[conversation_id] = conversation
+
+            # Evict least recently used if cache is full
+            if len(self.active_conversations) > self.max_active_conversations:
+                lru_id = next(iter(self.active_conversations))
+                logger.debug(f"Evicting conversation {lru_id} from cache (LRU)")
+                del self.active_conversations[lru_id]
 
     async def create_conversation(self, title: str = None, model_name: str = None) -> Conversation:
         """Create a new conversation."""
@@ -234,8 +251,8 @@ class ConversationManager:
             model_name=model_name or self.model_manager.current_model
         )
 
-        # Store in memory and persistence
-        self.active_conversations[conversation_id] = conversation
+        # Store in memory cache and persistence
+        self._add_to_cache(conversation_id, conversation)
         await self.storage.save_conversation(conversation)
 
         logger.info(f"Created conversation: {conversation_id}")
@@ -245,12 +262,15 @@ class ConversationManager:
         """Get a conversation by ID."""
         # Check active conversations first
         if conversation_id in self.active_conversations:
+            # Mark as recently used
+            self.active_conversations.move_to_end(conversation_id)
             return self.active_conversations[conversation_id]
 
         # Load from storage
         conversation = await self.storage.load_conversation(conversation_id)
         if conversation:
-            self.active_conversations[conversation_id] = conversation
+            # Add to cache with LRU eviction
+            self._add_to_cache(conversation_id, conversation)
 
         return conversation
 
