@@ -41,6 +41,18 @@ class LlamaModel:
     async def load(self):
         """Load the model into memory."""
         try:
+            # Validate model file exists before attempting load
+            model_file = Path(self.model_path)
+            if not model_file.exists():
+                raise FileNotFoundError(
+                    f"Model file not found: {self.model_path}. "
+                    f"Please download the model or check the path."
+                )
+            if not model_file.is_file():
+                raise ValueError(
+                    f"Model path is not a file: {self.model_path}"
+                )
+
             # Import here to avoid dependency issues if not installed
             from llama_cpp import Llama
 
